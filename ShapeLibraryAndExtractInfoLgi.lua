@@ -4,8 +4,8 @@ function importLgi()
         if not hasLgi then 
             error("You need to have the Lua lgi-module installed and included in your Lua package path in order to use the GUI for the plugin.")
         end
-    Gtk = lgi.Gtk
-    Gdk = lgi.Gdk
+        Gtk = lgi.require("Gtk", "3.0")
+        Gdk = lgi.require("Gdk", "3.0")
 end
 
 local shapes_dict, sep, sourcePath
@@ -23,12 +23,6 @@ function initUi()
         toolbarId = "shapeDialog",
         iconName = "shapes_symbolic",
         accelerator = "y",
-    })
-    app.registerUi({
-        menu = "Extract_Stroke_Info",
-        callback = "extractInfoMainDialog",
-        toolbarId = "StrInfo",
-        iconName = "extract-info-symbolic"
     })
 end
 
@@ -79,20 +73,29 @@ local currentCategory = nil
 function show_main_shape_dialog(isUpdateFile, updatedStroke)
     importLgi() -- import Lgi
     local window = Gtk.Window {
-        title = "Select Shape Category",
-        default_width = 300,
+        title = "☆ Shape Library ☆",
+        default_width = 600,
         default_height = 400,
         on_destroy = function() window:hide() end
     }
 
-    -- Center the dialog on screen
-    local screen = Gdk.Screen:get_default()
-    local screen_width, screen_height = screen:get_width(), screen:get_height()
-    window:set_position(Gtk.WindowPosition.NONE)
-    window:move((screen_width - 300) / 2, (screen_height - 150) / 2)
+    -- Center the window on the screen
+    window:set_position(Gtk.WindowPosition.CENTER)  -- This centers the window on the screen
 
     local vbox = Gtk.Box { orientation = Gtk.Orientation.VERTICAL, spacing = 10, margin = 10 }
 
+    if isUpdateFile then 
+        -- Create a a label above the categories when user wants to update the shape
+        local labelCategorySelection = Gtk.Label { label = "Choose a Category to update the Shape"}
+        labelCategorySelection:set_markup("<span foreground='orange'>Choose a Category to update the Shape</span>") -- colored text
+        vbox:pack_start(labelCategorySelection, false, false, 0)
+    else
+        -- Create a a label above the categories when inserting the shape
+        local labelCategorySelection = Gtk.Label { label = "Choose a Category to insert Shape"}
+        labelCategorySelection:set_markup("<span foreground='orange'>Choose a Category to insert Shape</span>") -- colored text
+        vbox:pack_start(labelCategorySelection, false, false, 0)
+    end
+    
     -- Add buttons for each shape category
     for i, category in ipairs(shapes_dict) do
         local button = Gtk.Button { label = category.name }
@@ -104,12 +107,61 @@ function show_main_shape_dialog(isUpdateFile, updatedStroke)
         vbox:pack_start(button, false, false, 0)
     end
 
-    -- Cancel Button
-    local cancel_button = Gtk.Button { label = "Cancel" }
-    cancel_button.on_clicked = function() 
-        window:hide() 
+    -- Create horizontal separator (above the add shape button)
+    local horizontal_separator_above_add_shape = Gtk.Separator { orientation = Gtk.Orientation.HORIZONTAL }
+    vbox:pack_start(horizontal_separator_above_add_shape, false, false, 0)
+
+
+
+    if isUpdateFile then 
+        -- Create a a label for caution when update the existing shapes
+        local labelCaution = Gtk.Label { label = ""}
+        labelCaution:set_markup("<span foreground='red'>➢ Once updated, you cannot get back the old shape!\n Keep backup of the 'Shapes' folder!</span>") -- colored text
+        vbox:pack_start(labelCaution, false, false, 0)
+
+        -- Back Button
+        local back_button = Gtk.Button { label = "Back" }
+            back_button.on_clicked = function() 
+            window:hide()
+            extractInfoMainDialog()
+        end
+        vbox:pack_start(back_button, false, false, 0)
+    else
+        -- Create a a label above the add shape button when insert the shape
+        local labelAddShape = Gtk.Label { label = "Add selected Shape to Shape Library"}
+        labelAddShape:set_markup("<span foreground='orange'>Add selected Shape to Shape Library</span>") -- colored text
+        vbox:pack_start(labelAddShape, false, false, 0)
+
+        -- Add shape Button
+        local add_shape_button = Gtk.Button { label = "Add or update Shape" }
+        add_shape_button.on_clicked = function() 
+            extractInfoMainDialog()
+            window:hide() 
+        end
+        vbox:pack_start(add_shape_button, false, false, 0)
+
+        -- Create horizontal separator (above the Cancel button)
+        local horizontal_separator_above_cancel = Gtk.Separator { orientation = Gtk.Orientation.HORIZONTAL }
+        vbox:pack_start(horizontal_separator_above_cancel, false, false, 010)
+
+        -- Cancel Button
+        local cancel_button = Gtk.Button { label = "Cancel" }
+        cancel_button.on_clicked = function() 
+            window:hide() 
+        end
+        vbox:pack_start(cancel_button, false, false, 0)
     end
-    vbox:pack_start(cancel_button, false, false, 0)
+
+
+
+    -- Create horizontal separator above footnote
+    local horizontal_separator_above_foot_note = Gtk.Separator { orientation = Gtk.Orientation.HORIZONTAL }
+    vbox:pack_start(horizontal_separator_above_foot_note, false, false, 0)
+
+    -- Create a a label above footnote
+    local labelFootNote = Gtk.Label { label = "Don't forget to share your shapes with us! Thank you."}
+    labelFootNote:set_markup("<span foreground='pink'>Don't forget to share your shapes with us! Thank you.</span>") -- colored text
+    vbox:pack_start(labelFootNote, false, false, 0)
 
     window:add(vbox)
     window:show_all()
@@ -118,19 +170,16 @@ end
 -- Function to show the shape selection dialog (GTK Window)
 function show_shape_dialog(categoryIndex, isUpdateFile, updatedStroke )
     local window = Gtk.Window {
-        title = "Select Shape",
-        default_width = 300,
+        title = "☆ Shape Library ☆",
+        default_width = 600,
         default_height = 400,
         on_destroy = function() 
             window:hide() 
         end
     }
 
-    -- Center the dialog on screen
-    local screen = Gdk.Screen:get_default()
-    local screen_width, screen_height = screen:get_width(), screen:get_height()
-    window:set_position(Gtk.WindowPosition.NONE)
-    window:move((screen_width - 300) / 2, (screen_height - 150) / 2)
+    -- Center the window on the screen
+    window:set_position(Gtk.WindowPosition.CENTER)  -- This centers the window on the screen
 
     local vbox = Gtk.Box { orientation = Gtk.Orientation.VERTICAL, spacing = 10, margin = 10 }
 
@@ -152,11 +201,17 @@ function show_shape_dialog(categoryIndex, isUpdateFile, updatedStroke )
         vbox:pack_start(button, false, false, 0)
     end
 
+
     -- Back Button
     local back_button = Gtk.Button { label = "Back" }
     back_button.on_clicked = function()
         window:hide()
-        show_main_shape_dialog()
+
+        if isUpdateFile then -- when updating an existing file
+            show_main_shape_dialog(isUpdateFile)
+        else -- when inserting shapes
+            show_main_shape_dialog()
+        end
     end
     vbox:pack_start(back_button, false, false, 0)
 
@@ -232,7 +287,7 @@ function extractInfoMainDialog()
     -- Create the main window where users can choose a category
     local window = Gtk.Window {
         title = "Extract Shape Info",  -- Window title
-        default_width = 400,  -- Default width of the window
+        default_width = 600,  -- Default width of the window
         default_height = 400,  -- Default height of the window
         on_destroy = Gtk.main_quit,  -- Close the GTK application when the window is destroyed
     }
@@ -249,6 +304,7 @@ function extractInfoMainDialog()
 
     -- Add a label at the top of the vbox
     local label = Gtk.Label { label = "Select a category and give a name to your Shape." }
+    label:set_markup("<span foreground='orange'>Select a category and give a name to your Shape.</span>") -- colored text
     vbox:pack_start(label, false, false, 0)  -- Add the label to the vbox (non-expandable)
 
     -- Dynamically create buttons for each category in the shapes_dict
@@ -280,19 +336,19 @@ function extractInfoMainDialog()
     local updateExisting_button = Gtk.Button { label = "Update Existing Shape" }
     updateExisting_button.on_clicked = function()
         window:hide()
-        local isUpdateFile = true -- then opens the main category dialog, then user select category and then shape name, the shape name is given to write stroke function
+        local isUpdateFile = true -- then opens the main category dialog, then user select category and then shape name, the shape name is given to write stroke function and it will replace the shape file
         show_main_shape_dialog(isUpdateFile, strokes)
     end
     vbox:pack_start(updateExisting_button, false, false, 0)  -- Add the create button to the vbox
 
-    -- Cancel button at the bottom
-    local cancel_button = Gtk.Button { label = "Cancel" }
-    cancel_button.on_clicked = function()
-    -- app.openDialog("Hi", {"OK"})
+    -- Back button at the bottom
+    local back_button = Gtk.Button { label = "Back" }
+    back_button.on_clicked = function()
         -- When the cancel button is clicked, hide the main window
         window:hide()
+        show_main_shape_dialog()
     end
-    vbox:pack_end(cancel_button, false, false, 0)  -- Add the cancel button to the vbox
+    vbox:pack_end(back_button, false, false, 0)  -- Add the cancel button to the vbox
 
     -- Add the vbox (containing all buttons) to the main window
     window:add(vbox)
