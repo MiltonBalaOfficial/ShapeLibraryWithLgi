@@ -18,7 +18,7 @@ function initUi()
     shapes_dict = loadConfig()
 
     app.registerUi({
-        menu = "Insert Shapes",
+        menu = "Shape Library",
         callback = "show_main_shape_dialog",
         toolbarId = "shapeDialog",
         iconName = "shapes_symbolic",
