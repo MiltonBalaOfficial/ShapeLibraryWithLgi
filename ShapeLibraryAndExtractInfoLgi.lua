@@ -1,30 +1,26 @@
--- Import LGI for GTK UI integration
-function importLgi()
-    local hasLgi, lgi = pcall(require, "lgi")
-        if not hasLgi then 
-            error("You need to have the Lua lgi-module installed and included in your Lua package path in order to use the GUI for the plugin.")
-        end
-        Gtk = lgi.require("Gtk", "3.0")
-        Gdk = lgi.require("Gdk", "3.0")
+-- Load required modules
+local stroke_io = require "stroke_io" -- Handles stroke file I/O
+local insertion_helper = require "insertion_helper" -- Provides shape insertion functionality
+local shape_update_helper = require "shape_update_helper"
+local shape_dict, sep, sourcePath
+local message2
+local isAddShape, isAddShapeToExistingCategory, isAddShapeToNewCategory, isUpdateShape
+local addShapeViewName, addShapeShapeName, addShapeCategoryName, addShapeNewCategoryName
+
+-- Initialize the module table
+local _M = {}
+
+-- Check for lgi module (for Gtk GUI functionality)
+local hasLgi, lgi = pcall(require, "lgi")
+if not hasLgi then
+    app.openDialog(
+        "You need to have the Lua lgi-module installed and included in your Lua package path in order to use the GUI for this plugin. \n\n",
+        {"OK"}, "", true)
+    return
 end
-
-local shapes_dict, sep, sourcePath
-
-function initUi()
-    sep = package.config:sub(1, 1) -- OS-specific path separator
-    sourcePath = debug.getinfo(1).source:match("@?(.*" .. sep .. ")")
-
-    -- Load the config.lua file for the first time, if the file is edited then it should be loaded again for using the config file dynamically
-    shapes_dict = loadConfig()
-
-    app.registerUi({
-        menu = "Shape Library",
-        callback = "show_main_shape_dialog",
-        toolbarId = "shapeDialog",
-        iconName = "shapes_symbolic",
-        accelerator = "y",
-    })
-end
+-- Import Gtk and Gdk from lgi
+local Gtk = lgi.require("Gtk", "3.0")
+local Gdk = lgi.require("Gdk", "3.0")
 
 -- Function to load config.lua file for dictionary data
 function loadConfig()
@@ -32,441 +28,50 @@ function loadConfig()
     return dofile(configFilePath)
 end
 
--- Read strokes from a file and return formatted strokes
-function read_strokes_from_file(filepath)
-    if filepath == nil then return end
-    local hasFile, content = pcall(dofile, filepath)
-    if not hasFile then print("Error: " .. content) return end
+function initUi()
+    sep = package.config:sub(1, 1) -- OS-specific path separator
+    sourcePath = debug.getinfo(1).source:match("@?(.*" .. sep .. ")")
 
-    local strokesToAdd = {}
-    for _, stroke in ipairs(content) do
-        if type(stroke) == "table" and stroke.x and stroke.y then
-            local newStroke = {
-                x = stroke.x, y = stroke.y,
-                pressure = stroke.pressure,
-                tool = stroke.tool or "pen",
-                color = stroke.color or 0,
-                width = stroke.width or 1,
-                fill = stroke.fill or 0,
-                lineStyle = stroke.lineStyle or "plain"
-            }
-            table.insert(strokesToAdd, newStroke)
-        end
-    end
-    return strokesToAdd
+    -- Load the config.lua file for the first time, if the file is edited then it should be loaded again for using the config file dynamically
+    shape_dict = loadConfig()
+
+    app.registerUi({
+        menu = "Shape Library (Lgi)",
+        callback = "show_main_shape_dialog",
+        toolbarId = "shapeDialog",
+        iconName = "shapes_symbolic",
+        accelerator = "y"
+    })
 end
 
--- Insert stroke function
-function insert_stroke(shape_name)
+-- Function to read strokes for a specific shape based on shape file name
+function get_strokes(shape_name)
     local filepath = sourcePath .. "Shapes" .. sep .. shape_name .. ".lua"
-    local strokes = read_strokes_from_file(filepath)
-    if strokes and #strokes > 0 then
-        local refs = app.addStrokes({ strokes = strokes, allowUndoRedoAction = "grouped" })
-        app.refreshPage()
-        app.addToSelection(refs)
-    end
+    return stroke_io.read_strokes_from_file(filepath)
 end
 
--- Function to show the main shape dialog (GTK Window)
-local currentCategory = nil
-
-function show_main_shape_dialog(isUpdateFile, updatedStroke)
-    importLgi() -- import Lgi
-    local window = Gtk.Window {
-        title = "☆ Shape Library ☆",
-        default_width = 600,
-        default_height = 400,
-        on_destroy = function() window:hide() end
+-- Function to compute the bounding box for a set of strokes
+function compute_bounds(strokes)
+    local min_x, min_y, max_x, max_y = math.huge, math.huge, -math.huge, -math.huge
+    for _, stroke in ipairs(strokes) do
+        for _, x in ipairs(stroke.x) do
+            min_x = math.min(min_x, x)
+            max_x = math.max(max_x, x)
+        end
+        for _, y in ipairs(stroke.y) do
+            min_y = math.min(min_y, y)
+            max_y = math.max(max_y, y)
+        end
+    end
+    return {
+        x = min_x,
+        width = max_x - min_x,
+        y = min_y,
+        height = max_y - min_y
     }
-
-    -- Center the window on the screen
-    window:set_position(Gtk.WindowPosition.CENTER)  -- This centers the window on the screen
-
-    local vbox = Gtk.Box { orientation = Gtk.Orientation.VERTICAL, spacing = 10, margin = 10 }
-
-    if isUpdateFile then 
-        -- Create a a label above the categories when user wants to update the shape
-        local labelCategorySelection = Gtk.Label { label = "Choose a Category to update the Shape"}
-        labelCategorySelection:set_markup("<span foreground='orange'>Choose a Category to update the Shape</span>") -- colored text
-        vbox:pack_start(labelCategorySelection, false, false, 0)
-    else
-        -- Create a a label above the categories when inserting the shape
-        local labelCategorySelection = Gtk.Label { label = "Choose a Category to insert Shape"}
-        labelCategorySelection:set_markup("<span foreground='orange'>Choose a Category to insert Shape</span>") -- colored text
-        vbox:pack_start(labelCategorySelection, false, false, 0)
-    end
-    
-    -- Add buttons for each shape category
-    for i, category in ipairs(shapes_dict) do
-        local button = Gtk.Button { label = category.name }
-        button.on_clicked = function()
-            currentCategory = i
-            window:hide()
-            show_shape_dialog(i, isUpdateFile, updatedStroke)
-        end
-        vbox:pack_start(button, false, false, 0)
-    end
-
-    -- Create horizontal separator (above the add shape button)
-    local horizontal_separator_above_add_shape = Gtk.Separator { orientation = Gtk.Orientation.HORIZONTAL }
-    vbox:pack_start(horizontal_separator_above_add_shape, false, false, 0)
-
-
-
-    if isUpdateFile then 
-        -- Create a a label for caution when update the existing shapes
-        local labelCaution = Gtk.Label { label = ""}
-        labelCaution:set_markup("<span foreground='red'>➢ Once updated, you cannot get back the old shape!\n Keep backup of the 'Shapes' folder!</span>") -- colored text
-        vbox:pack_start(labelCaution, false, false, 0)
-
-        -- Back Button
-        local back_button = Gtk.Button { label = "Back" }
-            back_button.on_clicked = function() 
-            window:hide()
-            extractInfoMainDialog()
-        end
-        vbox:pack_start(back_button, false, false, 0)
-    else
-        -- Create a a label above the add shape button when insert the shape
-        local labelAddShape = Gtk.Label { label = "Add selected Shape to Shape Library"}
-        labelAddShape:set_markup("<span foreground='orange'>Add selected Shape to Shape Library</span>") -- colored text
-        vbox:pack_start(labelAddShape, false, false, 0)
-
-        -- Add shape Button
-        local add_shape_button = Gtk.Button { label = "Add or update Shape" }
-        add_shape_button.on_clicked = function() 
-            extractInfoMainDialog()
-            window:hide() 
-        end
-        vbox:pack_start(add_shape_button, false, false, 0)
-
-        -- Create horizontal separator (above the Cancel button)
-        local horizontal_separator_above_cancel = Gtk.Separator { orientation = Gtk.Orientation.HORIZONTAL }
-        vbox:pack_start(horizontal_separator_above_cancel, false, false, 010)
-
-        -- Cancel Button
-        local cancel_button = Gtk.Button { label = "Cancel" }
-        cancel_button.on_clicked = function() 
-            window:hide() 
-        end
-        vbox:pack_start(cancel_button, false, false, 0)
-    end
-
-
-
-    -- Create horizontal separator above footnote
-    local horizontal_separator_above_foot_note = Gtk.Separator { orientation = Gtk.Orientation.HORIZONTAL }
-    vbox:pack_start(horizontal_separator_above_foot_note, false, false, 0)
-
-    -- Create a a label above footnote
-    local labelFootNote = Gtk.Label { label = "Don't forget to share your shapes with us! Thank you."}
-    labelFootNote:set_markup("<span foreground='pink'>Don't forget to share your shapes with us! Thank you.</span>") -- colored text
-    vbox:pack_start(labelFootNote, false, false, 0)
-
-    window:add(vbox)
-    window:show_all()
 end
 
--- Function to show the shape selection dialog (GTK Window)
-function show_shape_dialog(categoryIndex, isUpdateFile, updatedStroke )
-    local window = Gtk.Window {
-        title = "☆ Shape Library ☆",
-        default_width = 600,
-        default_height = 400,
-        on_destroy = function() 
-            window:hide() 
-        end
-    }
-
-    -- Center the window on the screen
-    window:set_position(Gtk.WindowPosition.CENTER)  -- This centers the window on the screen
-
-    local vbox = Gtk.Box { orientation = Gtk.Orientation.VERTICAL, spacing = 10, margin = 10 }
-
-    local category = shapes_dict[categoryIndex]
-
-    -- Add buttons for each shape
-    for i, shape in ipairs(category.shapes) do
-        local button = Gtk.Button { label = shape.name }
-        button.on_clicked = function()
-            window:hide()
-            if isUpdateFile then -- for updating existing file 
-                -- Proceed with initiating the function to store stroke info
-                store_stroke_info_in_file(shape.shapeName, updatedStroke)
-                window:hide()
-            else -- for normal case shape will be inserted
-            insert_stroke(shape.shapeName)
-            end 
-        end
-        vbox:pack_start(button, false, false, 0)
-    end
-
-
-    -- Back Button
-    local back_button = Gtk.Button { label = "Back" }
-    back_button.on_clicked = function()
-        window:hide()
-
-        if isUpdateFile then -- when updating an existing file
-            show_main_shape_dialog(isUpdateFile)
-        else -- when inserting shapes
-            show_main_shape_dialog()
-        end
-    end
-    vbox:pack_start(back_button, false, false, 0)
-
-    window:add(vbox)
-    window:show_all()
-end
-
--- writes a shape_stroke file with the shape name provided by the user
-function store_stroke_info_in_file(shapeName, strokes)
-    -- Open a file for writing in the folder path
-    local file = assert(io.open(sourcePath .. "Shapes" .. sep .. shapeName .. ".lua", "w"))
-    -- Start writing the Lua table format
-    file:write("local strokesData = {\n")
-    -- Iterate over each stroke and collect information
-    for i, stroke in ipairs(strokes) do
-        file:write(string.format("  [%d] = {\n", i))
-        file:write("    x = { ")
-        -- Write x coordinates
-        for j = 1, #stroke.x do
-            file:write(stroke.x[j])
-            if j < #stroke.x then
-                file:write(", ")
-            end
-        end
-        file:write(" },\n")
-        file:write("    y = { ")
-        -- Write y coordinates
-        for j = 1, #stroke.y do
-            file:write(stroke.y[j])
-            if j < #stroke.y then
-                file:write(", ")
-            end
-        end
-        file:write(" },\n")
-
-        -- Write pressure values if present
-        if stroke.pressure then
-            file:write("    pressure = { ")
-            for j = 1, #stroke.pressure do
-                file:write(stroke.pressure[j])
-                if j < #stroke.pressure then
-                    file:write(", ")
-                end
-            end
-            file:write(" },\n")
-        else
-            file:write("    pressure = {},\n")
-        end
-
-        -- Write stroke options
-        file:write(string.format("    tool = \"%s\",\n", stroke.tool or "N/A"))
-        file:write(string.format("    color = %s,\n", stroke.color or "N/A"))
-        file:write(string.format("    width = %.2f,\n", stroke.width or 0.0))
-        file:write(string.format("    fill = %d,\n", stroke.fill or 0))
-        file:write(string.format("    lineStyle = \"%s\",\n", stroke.lineStyle or "N/A"))
-        file:write("  },\n") -- End of stroke table
-    end
-    file:write("}\n")
-    file:write("return strokesData")
-    file:write("   -- Return the strokesData table") -- End of strokesData table
-
-    -- Close the file
-    file:close()
-end
-
--- Function to display the extract info main dialog for user choice
-function extractInfoMainDialog()
-    importLgi() -- import Lgi
-    local strokes = app.getStrokes("selection")
-    if not strokes then
-        error("First select your shape.")
-    end
-    -- Create the main window where users can choose a category
-    local window = Gtk.Window {
-        title = "Extract Shape Info",  -- Window title
-        default_width = 600,  -- Default width of the window
-        default_height = 400,  -- Default height of the window
-        on_destroy = Gtk.main_quit,  -- Close the GTK application when the window is destroyed
-    }
-
-    -- Center the window on the screen
-    window:set_position(Gtk.WindowPosition.CENTER)  -- This centers the window on the screen
-
-    -- Create a vertical box (vbox) to organize elements vertically within the window
-    local vbox = Gtk.Box {
-        orientation = Gtk.Orientation.VERTICAL,  -- Stack the elements vertically
-        spacing = 10,  -- Spacing between elements
-        margin = 20,  -- Margin around the box
-    }
-
-    -- Add a label at the top of the vbox
-    local label = Gtk.Label { label = "Select a category and give a name to your Shape." }
-    label:set_markup("<span foreground='orange'>Select a category and give a name to your Shape.</span>") -- colored text
-    vbox:pack_start(label, false, false, 0)  -- Add the label to the vbox (non-expandable)
-
-    -- Dynamically create buttons for each category in the shapes_dict
-    for _, category in ipairs(shapes_dict) do
-        -- Create a button for each category
-        local button = Gtk.Button { label = category.name }  -- Button label is the category name
-
-        -- Action when the category button is clicked
-        button.on_clicked = function()
-            -- When a category button is clicked, show the input window for that category
-            extractInfoInputDialogWithoutCategory(category.name,strokes)
-            window:hide()  -- Hide the main window
-        end
-
-        -- Add the category button to the vbox
-        vbox:pack_start(button, false, false, 0)
-    end
-
-    -- "Create New Category" button at the bottom
-    local newCategory_button = Gtk.Button { label = "Create New Category" }
-    newCategory_button.on_clicked = function()
-        -- When the "Create New Category" button is clicked, hide the main window and show the new category input form
-        window:hide()
-        extractInfoInputDialogWithCategory(strokes)
-    end
-    vbox:pack_start(newCategory_button, false, false, 0)  -- Add the create button to the vbox
-
-    -- "Update existing shape" button at the bottom
-    local updateExisting_button = Gtk.Button { label = "Update Existing Shape" }
-    updateExisting_button.on_clicked = function()
-        window:hide()
-        local isUpdateFile = true -- then opens the main category dialog, then user select category and then shape name, the shape name is given to write stroke function and it will replace the shape file
-        show_main_shape_dialog(isUpdateFile, strokes)
-    end
-    vbox:pack_start(updateExisting_button, false, false, 0)  -- Add the create button to the vbox
-
-    -- Back button at the bottom
-    local back_button = Gtk.Button { label = "Back" }
-    back_button.on_clicked = function()
-        -- When the cancel button is clicked, hide the main window
-        window:hide()
-        show_main_shape_dialog()
-    end
-    vbox:pack_end(back_button, false, false, 0)  -- Add the cancel button to the vbox
-
-    -- Add the vbox (containing all buttons) to the main window
-    window:add(vbox)
-    window:show_all()  -- Show the window and all its contents
-end
-
-
--- the input window for existing categories
-function extractInfoInputDialogWithoutCategory(categoryName, strokes)
-    local window = Gtk.Window {
-        title = "Add Shape to " .. categoryName,
-        default_width = 400,
-        default_height = 200,
-        on_destroy = Gtk.main_quit,
-    }
-
-    window:set_position(Gtk.WindowPosition.CENTER)
-
-    local vbox = Gtk.Box {
-        orientation = Gtk.Orientation.VERTICAL,
-        spacing = 10,
-        margin = 20,
-    }
-
-    local label1 = Gtk.Label { label = "Shape File Name:" }
-    local entry1 = Gtk.Entry { placeholder_text = "Enter shape file name" }
-
-    local ok_button = Gtk.Button { label = "OK" }
-    ok_button.on_clicked = function()
-    
-        local shapeName = entry1.text
-    
-        if shapeName and shapeName ~= "" then
-            -- Proceed with initiating the function to store stroke info
-                
-                local ShapeFileNameCamel = toCamelCase(shapeName)
-                store_stroke_info_in_file(ShapeFileNameCamel, strokes)
-                updateDictionary(categoryName, shapeName, ShapeFileNameCamel, nil)
-                --app.openDialog(ShapeFileNameCamel,{"OK"})
-            -- Hide the window after processing
-            window:hide()
-        else
-            print("Error: Shape file name must be filled out.")
-        end
-    end
-
-    -- Back Button
-    local back_button = Gtk.Button { label = "Back" }
-    back_button.on_clicked = function()
-        window:hide()
-        extractInfoMainDialog()
-    end
-
-    vbox:pack_start(label1, false, false, 0)
-    vbox:pack_start(entry1, false, false, 0)
-    vbox:pack_start(ok_button, false, false, 10)
-    vbox:pack_start(back_button, false, false, 0)
-    window:add(vbox)
-    window:show_all()
-end
-
--- Overriding the input window for new categories
-function extractInfoInputDialogWithCategory(strokes)
-    local window = Gtk.Window {
-        title = "Create New Category",
-        default_width = 400,
-        default_height = 200,
-        on_destroy = Gtk.main_quit,
-    }
-
-    window:set_position(Gtk.WindowPosition.CENTER)
-
-    local vbox = Gtk.Box {
-        orientation = Gtk.Orientation.VERTICAL,
-        spacing = 10,
-        margin = 20,
-    }
-
-    local label1 = Gtk.Label { label = "Category Name:" }
-    local entry1 = Gtk.Entry { placeholder_text = "Enter category name" }
-
-    local label2 = Gtk.Label { label = "Shape File Name:" }
-    local entry2 = Gtk.Entry { placeholder_text = "Enter shape file name" }
-
-    local ok_button = Gtk.Button { label = "OK" }
-    ok_button.on_clicked = function()
-        local newCategoryName = entry1.text
-        local shapeName = entry2.text
-        if newCategoryName == "" or shapeName == "" then
-            print("Error: All fields must be filled out.")
-        else
-            
-            local ShapeFileNameCamel = toCamelCase(shapeName)
-            store_stroke_info_in_file(ShapeFileNameCamel, strokes)
-            updateDictionary(nil, shapeName, ShapeFileNameCamel, newCategoryName)
-            window:hide()
-        end
-    end
-
-    -- Back Button
-    local back_button = Gtk.Button { label = "Back" }
-    back_button.on_clicked = function()
-        window:hide()
-        extractInfoMainDialog()
-    end
-
-    vbox:pack_start(label1, false, false, 0)
-    vbox:pack_start(entry1, false, false, 0)
-    vbox:pack_start(label2, false, false, 0)
-    vbox:pack_start(entry2, false, false, 0)
-    vbox:pack_start(ok_button, false, false, 10)
-    vbox:pack_start(back_button, false, false, 0)
-    window:add(vbox)
-    window:show_all()
-end
-
-
--- convert Shape name string to camel case
+-- convert Shape name string to camel case (needed for make a shape file name from the user provided shape name)
 function toCamelCase(str)
     local words = {}
     for word in str:gmatch("%S+") do
@@ -480,91 +85,780 @@ function toCamelCase(str)
     return table.concat(words)
 end
 
+-- Function to draw the shape preview in the drawing area
+function add_image_to_drawing_area(cr, shapeName, drawing_area)
+        cr:set_source_rgba(1, 1, 1, 0) 
+        cr:paint()
 
--- Function to read, modify, and write back to the shapes file
-function updateDictionary(categoryName, shapeName, shapeFileName, newCategoryName)
-    -- Step 1: Load the file
-    local filePath = sourcePath .. "config.lua"
-    local shapesData, err = loadfile(filePath)
-    if not shapesData then
-        print("Error: Could not load file - " .. err)
-        return
+        -- Draw the border
+        cr:set_line_width(1)         -- Border thickness
+        cr:set_source_rgb(0.3, 0.3, 0.3)  -- Border color
+        cr:rectangle(1, 1, 198, 98) -- Adjust dimensions for the border when the drawing area changes
+        cr:stroke()
+
+        -- Retrieve strokes for the given shape
+        local strokes = get_strokes(shapeName)
+        if not strokes or #strokes == 0 then
+            return -- Exit if no strokes are available
+        end
+
+        -- Compute the bounding box of the strokes
+        local bounds = compute_bounds(strokes)
+        if bounds.width == 0 or bounds.height == 0 then
+            return -- Avoid division by zero
+        end
+
+        -- Get the dimensions of the drawing area
+        local width = drawing_area.width_request 
+        local height = drawing_area.height_request
+
+        -- Calculate scaling factors and translations
+        local scale_x = width / bounds.width
+        local scale_y = height / bounds.height
+        local scale = math.min(scale_x, scale_y) * 0.8 -- Scale to fit, with padding
+
+        -- Apply the check: if scale_factor > 1, don't scale, otherwise apply scaling
+        if scale > 1 then
+            scale = 1 + (scale - 1) * 0.2 -- Keep the actual size (slightly larger)
+        end
+
+        -- Center the shape in the drawing area
+        local offset_x = (width - (bounds.width * scale)) / 2
+        local offset_y = (height - (bounds.height * scale)) / 2
+
+        -- Apply transformations
+        cr:translate(offset_x, offset_y)
+        cr:scale(scale, scale)
+        cr:translate(-bounds.x, -bounds.y) -- Translate to the top-left of the shape
+
+        -- Draw the strokes
+        for _, stroke in ipairs(strokes) do
+            if #stroke.x > 0 then
+
+                local function decimal_to_rgb(color)
+                    local r = (color >> 16) & 0xFF -- Extract the red component
+                    local g = (color >> 8) & 0xFF -- Extract the green component
+                    local b = color & 0xFF -- Extract the blue component
+                    return r / 255, g / 255, b / 255 -- Normalize to 0-1 range
+                end
+
+                local color = stroke.color -- pick the stroke color from the file
+                local r, g, b = decimal_to_rgb(color)
+                cr:set_source_rgb(r, g, b)
+
+                -- Define line type (dashed/dotted)
+                local line_type = stroke.lineStyle
+                if line_type == "dash" then
+                    cr:set_dash({10, 5}, 0) -- Dash of length 10, gap of 5
+                elseif line_type == "dot" then
+                    cr:set_dash({2, 4}, 0) -- Dot of length 2, gap of 4
+                elseif line_type == "dashdot" then
+                    cr:set_dash({10, 5, 2, 5}, 0) -- Dash of length 10, gap of 5, dot of length 2, gap of 5
+                else
+                    cr:set_dash({}, 0) -- Solid line (no dashes)
+                end
+
+                -- Adjust line thickness based on the scale factor
+                local base_thickness = stroke.width -- Base thickness for normalized scale
+                local line_thickness = base_thickness / scale * 1.2 -- 20% thicker for better view
+
+                local has_pressure = stroke.pressure and #stroke.pressure > 0
+                if has_pressure then -- breaks the stroke into line segments to simulate variable width for a stroke 
+                    local default_pressure = line_thickness
+
+                    for i = 2, #stroke.x do
+                        cr:move_to(stroke.x[i - 1], stroke.y[i - 1])
+                        cr:line_to(stroke.x[i], stroke.y[i])
+                        -- Adjust line width dynamically for each segment
+                        local line_width = has_pressure and stroke.pressure[i] or default_pressure
+                        cr:set_line_width(line_width)
+                        cr:stroke() -- Draw the current segment
+                    end
+                else -- if no pressure value then width is a usual (if this is not used then fill property won't work for segmented strokes)
+                    cr:set_line_width(line_thickness)
+
+                    cr:move_to(stroke.x[1], stroke.y[1])
+                    for i = 2, #stroke.x do
+                        cr:line_to(stroke.x[i], stroke.y[i])
+                    end
+                end
+
+                if stroke.fill > 2 then --Some strokes have fill = 1 though no need, so to avoid this I use 2 here
+                    local opacity = stroke.fill / 255
+                    cr:set_source_rgba(r, g, b, opacity)
+                    cr:fill_preserve() -- Fill the shape but keep the path for stroking
+                end
+                cr:stroke()
+            end
+        end
     end
 
-    -- Execute the loaded function to get the shapes data
-    shapesData = shapesData()
+    -- Helper function to escape special characters in dynamic_text
+    function escapeMarkup(text)
+        return text:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+    end
+        
+    -- Function to update the label text dynamically
+    function updateMessage(label, dynamic_text)
+        local escaped_text = escapeMarkup(dynamic_text)
+        local new_text = string.format("<span foreground='orange'>%s</span>", escaped_text)
+        label:set_label(new_text)
+        label:set_use_markup(true)
+    end
 
-    -- Step 2: Modify the table by either finding the category or adding a new one
-    local categoryFound = false
-
-    if newCategoryName then
-        -- If a new category name is provided, add the new category
-        local newCategory = {
-            name = newCategoryName,
-            shapes = {
-                { name = shapeName, shapeName = shapeFileName }
+    -- Function to create or update a grid layout
+    local function create_grid(grid, category_name)
+        if grid then -- If the grid already exists, remove all its children
+            for _, child in ipairs(grid:get_children()) do
+                grid:remove(child)
+            end
+        else
+            grid = Gtk.Grid {
+                column_spacing = 10,
+                row_spacing = 1,
+                column_homogeneous = true
             }
-        }
-        -- Insert the new category at the beginning (index 1)
-        table.insert(shapesData, newCategory)
-        print("New category added: " .. newCategoryName .. " with shape: " .. shapeName)
-    elseif categoryName then
-        -- If no new category, find the existing one
-        for _, category in ipairs(shapesData) do
-            if category.name == categoryName then
-                -- Find the next available key for shapes (next available index)
-                local nextKey = #category.shapes + 1
-                -- Add the new shape to the shapes table
-                category.shapes[nextKey] = { name = shapeName, shapeName = shapeFileName }
-                print("Shape added: " .. shapeName .. " in category " .. category.name)
-                categoryFound = true
+        end
+
+        local row, col = 0, 0
+        local max_columns = 3
+        local selected_category = nil
+
+        -- Find the selected category
+        for _, category in ipairs(shape_dict) do
+            if category.name == category_name then
+                selected_category = category
                 break
             end
         end
 
-        if not categoryFound then
-            print("Error: Category not found!")
-            return
-        end
-    end
+        -- Default to the first category if not found
+        selected_category = selected_category or shape_dict[1]
 
-    -- Step 3: Serialize the table back to Lua syntax
-    local function serializeTable(tbl, indent)
-        local result = ""
-        for i, v in ipairs(tbl) do
-            -- Start each category block
-            result = result .. "[" .. i .. "] = {\n"
-            result = result .. "    name = \"" .. v.name .. "\",\n"
-            result = result .. "    shapes = {\n"
-            
-            -- Serialize the shapes within the category
-            for j, shape in ipairs(v.shapes) do
-                result = result .. "        [" .. j .. "] = {"
-                result = result .. " name = \"" .. shape.name .. "\","
-                result = result .. " shapeName = \"" .. shape.shapeName .. "\""
-                result = result .. " },\n"
+        -- Populate the grid with shapes from the selected category
+        for _, shape in ipairs(selected_category.shapes) do
+            local button = Gtk.Button {
+                label = shape.name,
+                height_request = 30
+            }
+            button.on_clicked = function()
+                if isAddShape then -- when adding shape on click it will provide the shape name without inserting any shape
+                    updateMessage(message2, shape.name)
+                    addShapeShapeName = shape.shapeName
+                else
+                    -- Use the insert_shape_to_app function from the helper module
+                    insertion_helper.insert_stroke(shape.shapeName)
+                end
+
             end
 
-            result = result .. "    },\n"
-            result = result .. "},\n"
+            local drawing_area = Gtk.DrawingArea {
+                width_request = 200,
+                height_request = 100
+            }
+            drawing_area.on_draw = function(_, cr)
+                add_image_to_drawing_area(cr, shape.shapeName, drawing_area)
+                return true
+            end
+
+            grid:attach(button, col, row * 2 + 1, 1, 1)
+            grid:attach(drawing_area, col, row * 2, 1, 1)
+
+            col = col + 1
+            if col >= max_columns then
+                col = 0
+                row = row + 1
+                -- Add a separator after each full row of shapes
+                local separator = Gtk.Separator {
+                    orientation = Gtk.Orientation.HORIZONTAL,
+                    margin_bottom = 10
+                }
+                grid:attach(separator, 0, row * 2, max_columns, 1)
+                separator:show()
+                row = row + 1
+            end
         end
-        return result
+        return grid
     end
 
-    -- Wrap the serialized table in a return statement
-    local serializedData = "return {\n" .. serializeTable(shapesData, "    ") .. "}\n"
+-- Show Main window for Shape Library
+function show_main_shape_dialog()
+    local Cairo = lgi.cairo
 
-    -- Step 4: Write the updated data back to the file
-    local file = io.open(filePath, "w")
-    if file then
-        file:write(serializedData)
-        file:close()
-        print("File updated successfully!")
-    else
-        print("Error: Could not write to file!")
+    -- initially value will be nil
+    isAddShape, isAddShapeToExistingCategory, isAddShapeToNewCategory, isUpdateShape = nil, nil, nil, nil
+    addShapeViewName , addShapeShapeName, addShapeCategoryName, addShapeNewCategoryName = nil, nil, nil, nil
+
+    -- Custom CSS for making the button appeared as active after click
+    local customCssProvider = Gtk.CssProvider()
+    customCssProvider:load_from_data([[
+        button {
+            transition: background-color 0.3s ease;
+        }
+        button:active {
+            background:rgb(41, 42, 43); /* Darker background when clicked */
+        }
+        /* Style for the button when it remains in the 'active' state */
+        button.active {
+            background:rgb(34, 33, 33);  /* Coral background to indicate active state */
+            color: #fff;          /* Change text color for contrast */
+                    outline: none;
+        box-shadow: none;
+        }
+    ]])
+
+    -- Main window
+    local window = Gtk.Window {
+        title = "Shape Library",
+        default_width = 100,
+        default_height = 100,
+        on_destroy = Gtk.main_quit
+    }
+    -- Center the window on the screen
+    window:set_position(Gtk.WindowPosition.CENTER)
+
+        -- Main vertical box to hold other horizontal box and separators
+        local main_vertical_box = Gtk.Box {
+            orientation = Gtk.Orientation.VERTICAL,
+        }
+        window:add(main_vertical_box)
+        main_vertical_box:show()
+
+            -- middle horizontal box for category grid and shape grid and undo redo buttons
+            local middle_horizontal_box = Gtk.Box {
+                orientation = Gtk.Orientation.HORIZONTAL,
+            }
+            main_vertical_box:pack_start(middle_horizontal_box, true, true, 0)
+            middle_horizontal_box:show()
+
+                -- Left panel for category selection
+                local left_vertical_box = Gtk.Box {
+                    orientation = Gtk.Orientation.VERTICAL,
+                    margin_left = 12,
+                    margin_right = 12
+                }
+                middle_horizontal_box:pack_start(left_vertical_box, false, false, 0)
+                left_vertical_box:show()
+
+                    -- Label above the category grid
+                    local labelCategorySelection = Gtk.Label {
+                        label = "<span foreground='orange'>Choose a Category</span>",
+                        use_markup = true,
+                        margin_bottom = 5
+                    }
+                    left_vertical_box:pack_start(labelCategorySelection, false, false, 0)
+                    labelCategorySelection:show()
+
+                    -- Category grid
+                    local category_grid = Gtk.Grid {
+                        row_spacing = 5
+                    }
+                    left_vertical_box:pack_start(category_grid, false, false, 0)
+
+                    -- Label above Add shape button
+                    local labelAddShape = Gtk.Label {
+                        label = "<span foreground='orange'>Add your shape from selection</span>",
+                        use_markup = true,
+                        margin_top = 20,
+                        margin_bottom = 5,
+                    }
+                    left_vertical_box:pack_start(labelAddShape, false, false, 0)
+                    labelAddShape:show()
+
+                    -- Add shape from selection Button
+                    local add_or_update_shape_button = Gtk.Button {
+                        label = "Add or Update Shape"
+                    }
+                    left_vertical_box:pack_start(add_or_update_shape_button, false, false, 0)
+                    add_or_update_shape_button:show()
+                    
+                -- vertical separator between category grid and shape grig
+                local vertical_separator_middle_left_right = Gtk.Separator {
+                    orientation = Gtk.Orientation.VERTICAL
+                }
+                middle_horizontal_box:pack_start(vertical_separator_middle_left_right, false, false, 0)
+                vertical_separator_middle_left_right:show()
+
+                -- Right panel for the shape grid
+                local right_vertical_box = Gtk.Box {
+                    orientation = Gtk.Orientation.VERTICAL,
+                    margin_right = 12,
+                    margin_left = 12,
+                }
+                middle_horizontal_box:pack_start(right_vertical_box, true, true, 0)
+
+                    -- Label above the shape grid
+                    local labelShapeSelection = Gtk.Label {
+                        label = "<span foreground='orange'>Choose a Shape.</span>",
+                        use_markup = true,
+                        margin_top = 5,
+                        margin_bottom = 5,
+                    }
+                    right_vertical_box:pack_start(labelShapeSelection, false, false, 0)
+
+                    -- Scrolled window to hold the shape grid
+                    local scrolled_window = Gtk.ScrolledWindow {
+                        hscrollbar_policy = Gtk.PolicyType.NEVER,
+                        vscrollbar_policy = Gtk.PolicyType.AUTOMATIC,
+                        expand = true
+                    }
+                    local grid = create_grid(nil, nil)
+                    scrolled_window:add(grid)
+                    right_vertical_box:pack_start(scrolled_window, true, true, 0)
+
+                    -- horizontal separator below the shape grid (scroll window)
+                    local horizontal_separator_below_scrolled_window = Gtk.Separator {
+                        orientation = Gtk.Orientation.VERTICAL,
+                        margin_top = 5,
+                    }
+                    right_vertical_box:pack_start(horizontal_separator_below_scrolled_window, false, false, 0)
+
+                    -- Horizontal box to hold the buttons under the shape grid
+                    local horizontal_box_for_scrolled_window_menu = Gtk.Box {
+                        orientation = Gtk.Orientation.HORIZONTAL,
+                        spacing = 25,
+                        margin_top = 10,
+                        halign = Gtk.Align.CENTER -- Align the buttons in the middle horizontally
+                    }
+                    right_vertical_box:pack_start(horizontal_box_for_scrolled_window_menu, false, false, 0)
+
+                        -- Undo Button
+                        local undo_button = Gtk.Button {
+                            label = "Undo",
+                            width_request = 100,
+                        }
+                        horizontal_box_for_scrolled_window_menu:pack_start(undo_button, false, false, 0)
+                    
+                        -- Redo Button
+                        local redo_button = Gtk.Button {
+                            label = "Redo",
+                            width_request = 100,
+                        }
+                        horizontal_box_for_scrolled_window_menu:pack_start(redo_button, false, false, 0)
+                    
+                        -- Deselect Button
+                        local deselect_button = Gtk.Button {
+                            label = "Deselect",
+                            width_request = 100,
+                        }
+                        horizontal_box_for_scrolled_window_menu:pack_start(deselect_button, false, false, 0)
+                    
+                        -- Close Button
+                        local close_button = Gtk.Button {
+                            label = "Close",
+                            width_request = 100,
+                        }
+                        horizontal_box_for_scrolled_window_menu:pack_start(close_button, false, false, 0)
+
+                -- Show right vertical box with all its content
+                right_vertical_box:show_all()
+
+            -- Vertical box to hold the extra part of window when Shape is added
+            local add_shape_main_vertical_box = Gtk.Box {
+                orientation = Gtk.Orientation.VERTICAL,
+            }
+            main_vertical_box:pack_start(add_shape_main_vertical_box, false, false, 0)
+
+                -- Create the separator to indicate extra part
+                local horizontal_separator_above_shape_entry_fields = Gtk.Separator {
+                    orientation = Gtk.Orientation.VERTICAL
+                }
+                add_shape_main_vertical_box:pack_start(horizontal_separator_above_shape_entry_fields, false, false, 0)
+
+                -- Horizontal box for hold the add shape buttons on the left and input part on the right
+                local add_shape_horizontal_box = Gtk.Box {
+                    orientation = Gtk.Orientation.HORIZONTAL,
+                }
+                add_shape_main_vertical_box:pack_start(add_shape_horizontal_box, false, false, 0)
+
+                    -- vertical box to hold the add shape buttons
+                    local add_shape_button_vertical_box = Gtk.Box {
+                        orientation = Gtk.Orientation.VERTICAL,
+                        spacing = 5,
+                        margin_left = 12,
+                        margin_top = 20,
+                        margin_right = 12,
+                    }
+                    add_shape_horizontal_box:pack_start(add_shape_button_vertical_box, false, false, 0)
+
+                        -- Add shape to existing category Button
+                        local add_shape_button = Gtk.Button {
+                            label = "Add to existing category",
+                            width_request = 220,
+                        }
+                        add_shape_button_vertical_box:pack_start(add_shape_button, false, false, 0)
+                        add_shape_button:show()
+
+                        -- Add shape to a new category Button
+                        local add_shape_with_category_button = Gtk.Button {
+                            label = "Add to new category",
+                            width_request = 220,
+                        }
+                        add_shape_button_vertical_box:pack_start(add_shape_with_category_button, false, false, 0)
+                        add_shape_with_category_button:show()
+
+                        -- Add shape update existing Button
+                        local update_existing_shape = Gtk.Button {
+                            label = "Update existing shape",
+                            width_request = 220,
+                        }
+                        add_shape_button_vertical_box:pack_start(update_existing_shape, false, false, 0)
+                        update_existing_shape:show()
+
+                    -- Create the separator between add shape buttons and entry part
+                    local vertical_separator_between_button_and_entry = Gtk.Separator {
+                        orientation = Gtk.Orientation.VERTICAL
+                    }
+                    add_shape_horizontal_box:pack_start(vertical_separator_between_button_and_entry, false, false, 0)
+                    vertical_separator_between_button_and_entry:show()
+
+                    -- vertical box to hold entry items
+                    local add_shape_entry_vertical_box = Gtk.Box {
+                        orientation = Gtk.Orientation.VERTICAL,
+                        spacing = 10,
+                        margin_right = 12,
+                        margin_top = 12
+                    }
+                    add_shape_horizontal_box:pack_start(add_shape_entry_vertical_box, false, false, 0)
+
+                        -- horizontal box to hold category entry fields
+                        local category_input_horizontal_box = Gtk.Box {
+                            orientation = Gtk.Orientation.HORIZONTAL,
+                            spacing = 12,
+                            margin_left = 12
+                        }
+                        add_shape_entry_vertical_box:pack_start(category_input_horizontal_box, false, false, 0)
+
+                            -- category entry label
+                            local label1 = Gtk.Label {
+                                label = "Category Name:"
+                            }
+                            category_input_horizontal_box:pack_start(label1, false, false, 0)
+
+                            -- category entry input 
+                            local entry1 = Gtk.Entry {
+                                placeholder_text = "Enter category name"
+                            }
+                            category_input_horizontal_box:pack_start(entry1, false, false, 0)
+
+                            --Category entry message
+                            local message1 = Gtk.Label {
+                                -- label = string.format("<span foreground='orange'>%s</span>", addShapeMessage),
+                                label = "<span foreground='orange'>First select a category from the category list above.</span>",
+                                use_markup = true
+                            }
+                            category_input_horizontal_box:pack_start(message1, false, false, 0)
+
+                        -- horizontal box to hold shape name entry fields
+                        local shape_name_input_horizontal_box = Gtk.Box {
+                            orientation = Gtk.Orientation.HORIZONTAL,
+                            spacing = 12,
+                            margin_left = 12
+                        }
+                        add_shape_entry_vertical_box:pack_start(shape_name_input_horizontal_box, false, false, 0)
+
+                            -- shape name entry label
+                            local label2 = Gtk.Label {
+                                label = "Shape File Name:"
+                            }
+                            shape_name_input_horizontal_box:pack_start(label2, false, false, 0)
+
+                            -- shape name input field
+                            local entry2 = Gtk.Entry {
+                                placeholder_text = "Enter shape file name"
+                            }
+                            shape_name_input_horizontal_box:pack_start(entry2, false, false, 0)
+
+                            -- Shape name entry message
+                            message2 = Gtk.Label { -- it is set as global to modify it by a function before it.
+                                label = "<span foreground='orange'>Select a shape from a selected category.</span>",
+                                use_markup = true
+                            }
+                            shape_name_input_horizontal_box:pack_start(message2, false, false, 0)
+
+                        -- horizontal box to hold the cancel and ok button for add Shape field
+                        local add_shape_button_horizontal_box = Gtk.Box {
+                            orientation = Gtk.Orientation.HORIZONTAL,
+                            spacing = 12,
+                            margin_left = 12
+                        }
+                        add_shape_entry_vertical_box:pack_end(add_shape_button_horizontal_box, false, false, 0)
+
+                            -- Cancel button to Quit Add shape
+                            local cancel_button = Gtk.Button {
+                                label = "CANCEL"
+                            }
+                            add_shape_button_horizontal_box:pack_start(cancel_button, false, false, 0)
+
+                            -- Ok button to add shape with user inputs
+                            local ok_button = Gtk.Button {
+                                label = "OK"
+                            }
+                            add_shape_button_horizontal_box:pack_start(ok_button, false, false, 0)
+
+            -- Horizontal separator above the foot note
+            local horizontal_separator_above_foot_note = Gtk.Separator {
+                orientation = Gtk.Orientation.VERTICAL,
+                margin_top = 5,
+            }
+            main_vertical_box:pack_start(horizontal_separator_above_foot_note, false, false, 0)
+            horizontal_separator_above_foot_note:show()
+        
+            -- foot note label
+            local foot_note = Gtk.Label {
+                label = "<span foreground='orange'>Don't forget to share your shape with us. Thank You.</span>",
+                use_markup = true,
+                margin = 3
+            }
+            main_vertical_box:pack_start(foot_note, false, false, 0)
+            foot_note:show()
+
+
+    -- Add category buttons to the category grid and handle click and manage active state            
+    local previousCategoryButton = nil
+
+    for i, category_data in ipairs(shape_dict) do
+        -- Create a button with an initial magenta label
+        local CategoryButton = Gtk.Button {
+            label = category_data.name,
+            width_request = 220,
+            margin_bottom = 5
+        }
+
+        -- Apply initial style to the button label
+        local buttonContext = CategoryButton:get_style_context()
+        buttonContext:add_provider(customCssProvider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+
+        -- Attach the button to the grid
+        category_grid:attach(CategoryButton, 0, i - 1, 1, 1)
+
+        -- Set the first button as active by default
+        if i == 1 then
+            -- Add the "active" class to the first button
+            buttonContext:add_class("active")
+            previousCategoryButton = CategoryButton
+        end
+
+        -- Handle button click to toggle active state
+        CategoryButton.on_clicked = function()
+
+            if isAddShape then
+                updateMessage(message1, category_data.name)
+                updateMessage(message2, "Select a shape under the category.")
+                if isAddShapeToExistingCategory then
+                    addShapeCategoryName = category_data.name
+                end
+            end
+
+            -- create grid with the category name
+            grid = create_grid(grid, category_data.name) -- provide the shape name
+            scrolled_window:show_all()
+
+            -- If there was a previously active button, remove the active class
+            if previousCategoryButton then
+                previousCategoryButton:get_style_context():remove_class("active")
+            end
+
+            -- Add the "active" class to the clicked button
+            buttonContext:add_class("active")
+
+            -- Update the previous button reference
+            previousCategoryButton = CategoryButton
+        end
+    end
+    category_grid:show_all()
+
+
+
+
+    -- Handel Add Shape part clicked functions
+    local previousShapeButton = nil    -- Manage active state
+
+    -- Click handler for 'Add or Update Shape'
+    add_or_update_shape_button.on_clicked = function()
+        updateMessage(message1, "First select a category from the category list above.")
+        updateMessage(message2, "Select a shape under the category.")
+
+        if add_shape_main_vertical_box:get_visible() then -- when remove the add shape part
+            add_shape_main_vertical_box:hide()
+            add_shape_entry_vertical_box:hide()
+            window:resize(300, 200) -- will shrink the main window
+            right_vertical_box:set_sensitive(true)
+            category_grid:set_sensitive(true)
+            horizontal_box_for_scrolled_window_menu:set_sensitive(true)
+            horizontal_separator_above_shape_entry_fields:hide()
+
+            isAddShape, isAddShapeToExistingCategory, isAddShapeToNewCategory, isUpdateShape = nil, nil, nil, nil
+            addShapeViewName , addShapeShapeName, addShapeCategoryName, addShapeNewCategoryName = nil, nil, nil, nil
+
+            -- Deactivate the add shape buttons button
+            add_shape_button:get_style_context():remove_class("active")
+            add_shape_with_category_button:get_style_context():remove_class("active")
+            update_existing_shape:get_style_context():remove_class("active")
+            previousShapeButton = nil -- Clear the previousShapeButton reference
+        else -- When opens the add shape extra part
+            isAddShape = true
+            add_shape_main_vertical_box:show()
+            add_shape_horizontal_box:show()
+            add_shape_button_vertical_box:show_all()
+            right_vertical_box:set_sensitive(false)
+            category_grid:set_sensitive(false)
+            horizontal_separator_above_shape_entry_fields:show()
+        end
     end
 
-        -- Dynamically load the config.lua file after add entry
-        shapes_dict = loadConfig()
+    -- Click handler and manage active state for add shape different buttons
+    local function applyCss(button) -- Apply CSS to all buttons
+        local context = button:get_style_context()
+        context:add_provider(customCssProvider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+    end
+    applyCss(add_shape_button)
+    applyCss(add_shape_with_category_button)
+    applyCss(update_existing_shape)
+
+    local function setActive(button)
+        -- Remove the active state from the previous button
+        if previousShapeButton then
+            previousShapeButton:get_style_context():remove_class("active")
+        end
+
+        -- Add the active state to the current button
+        button:get_style_context():add_class("active")
+        previousShapeButton = button
+    end
+
+    -- add shape to existing category click handler
+    add_shape_button.on_clicked = function()
+        isAddShapeToExistingCategory = true
+        isUpdateShape = false
+        isAddShapeToNewCategory = false
+        setActive(add_shape_button)
+        add_shape_entry_vertical_box:show_all()
+        entry1:hide()
+        message2:hide()
+        right_vertical_box:set_sensitive(false)
+        category_grid:set_sensitive(true)
+    end
+
+    -- add shape to new category click handler
+    add_shape_with_category_button.on_clicked = function()
+        isAddShapeToNewCategory = true
+        isAddShapeToExistingCategory = false
+        isUpdateShape = false
+        setActive(add_shape_with_category_button)
+        add_shape_entry_vertical_box:show_all()
+        message1:hide()
+        message2:hide()
+        right_vertical_box:set_sensitive(false)
+        category_grid:set_sensitive(false)
+    end
+
+    -- add shape update click handler
+    update_existing_shape.on_clicked = function()
+        isUpdateShape = true
+        isAddShapeToNewCategory = false
+        isAddShapeToExistingCategory = false
+        setActive(update_existing_shape)
+        add_shape_entry_vertical_box:show_all()
+        entry1:hide()
+        entry2:hide()
+        right_vertical_box:set_sensitive(true)
+        category_grid:set_sensitive(true)
+        horizontal_box_for_scrolled_window_menu:set_sensitive(false)
+    end
+
+    -- Click handler for Add Shape cancel button
+    cancel_button.on_clicked = function()
+        updateMessage(message1, "First select a category from the category list above.")
+        updateMessage(message2, "Select a shape under the category.")
+
+        if add_shape_main_vertical_box:get_visible() then -- remove the add shape part
+            add_shape_main_vertical_box:hide()
+            add_shape_entry_vertical_box:hide()
+            window:resize(300, 200) -- will shrink the main window
+            right_vertical_box:set_sensitive(true)
+            category_grid:set_sensitive(true)
+            horizontal_box_for_scrolled_window_menu:set_sensitive(true)
+
+            isAddShape, isAddShapeToExistingCategory, isAddShapeToNewCategory, isUpdateShape = nil, nil, nil, nil
+            addShapeViewName , addShapeShapeName, addShapeCategoryName, addShapeNewCategoryName = nil, nil, nil, nil
+
+            -- Deactivate the add shape buttons
+            add_shape_button:get_style_context():remove_class("active")
+            add_shape_with_category_button:get_style_context():remove_class("active")
+            update_existing_shape:get_style_context():remove_class("active")
+            previousShapeButton = nil -- Clear the previousShapeButton reference
+        end
+    end
+
+
+    -- Click handler for Add Shape ok button
+    ok_button.on_clicked = function()
+        local strokes = app.getStrokes("selection")
+        if not strokes then
+            error("First select your shape.")
+        elseif isUpdateShape then -- When shape is added to 
+            stroke_io.store_stroke_info_in_file(addShapeShapeName, strokes)
+
+            -- set all nil
+            isAddShape, isAddShapeToExistingCategory, isAddShapeToNewCategory, isUpdateShape = nil, nil, nil, nil
+            addShapeViewName , addShapeShapeName, addShapeCategoryName, addShapeNewCategoryName = nil, nil, nil, nil
+
+            -- refresh the window
+            window:hide()
+            window:show()
+
+        elseif isAddShapeToExistingCategory then
+            addShapeViewName = entry2.text
+            addShapeShapeName = toCamelCase(addShapeViewName) -- prepare a file name (shapeName)
+            stroke_io.store_stroke_info_in_file(addShapeShapeName, strokes)
+            shape_update_helper.updateDictionary(addShapeCategoryName, addShapeViewName, addShapeShapeName, nil)
+            addShapeShapeName, addShapeCategoryName, isAddShapeToExistingCategory = nil, nil, nil
+
+            -- Dynamically load the config.lua file after add entry
+            shape_dict = loadConfig()
+            -- closes the window and reopen it
+            window:destroy()
+            show_main_shape_dialog()
+
+        elseif isAddShapeToNewCategory then
+            addShapeNewCategoryName = entry1.text
+            addShapeViewName = entry2.text
+            addShapeShapeName = toCamelCase(addShapeViewName)
+            stroke_io.store_stroke_info_in_file(addShapeShapeName, strokes)
+            shape_update_helper.updateDictionary(nil, addShapeViewName, addShapeShapeName, addShapeNewCategoryName)
+            addShapeShapeName, addShapeCategoryName, isAddShapeToNewCategory = nil, nil, nil
+
+            -- Dynamically load the config.lua file after add entry
+            shape_dict = loadConfig()
+            window:destroy()
+            show_main_shape_dialog()
+        end
+    end
+
+
+
+
+    -- Click handler of buttons below the shape GRID_SNAPPING
+    undo_button.on_clicked = function()
+        app.uiAction({action = "ACTION_UNDO"})
+    end
+
+    redo_button.on_clicked = function()
+        app.uiAction({action = "ACTION_REDO"})
+    end
+
+    deselect_button.on_clicked = function()
+        local refs = app.uiAction({action = "ACTION_SELECT_ALL"})
+        app.clearSelection(refs)
+    end
+
+    close_button.on_clicked = function()
+        window:destroy()
+    end
+
+    -- Show the window
+    window:show()
+    Gtk.main()
 end
 

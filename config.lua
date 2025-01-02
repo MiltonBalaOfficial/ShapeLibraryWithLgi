@@ -2,12 +2,12 @@ return {
 [1] = {
     name = "Page Decoration",
     shapes = {
-        [1] = { name = "Border Booklet(📖)", shapeName = "borderBooklet" },
-        [2] = { name = "Star (⚝)", shapeName = "star" },
-        [3] = { name = "Star (★)", shapeName = "star2" },
+        [1] = { name = "Border Booklet", shapeName = "borderBooklet" },
+        [2] = { name = "Star (wire)", shapeName = "hollowStar" },
+        [3] = { name = "Star (solid)", shapeName = "solidStar" },
         [4] = { name = "Curly Arrow", shapeName = "curlyArrow" },
-        [5] = { name = "Comment Box (▢)", shapeName = "commentBoxRectangular" },
-        [6] = { name = "Comment Box (⬭)", shapeName = "commentBoxOval" },
+        [5] = { name = "Comment Box", shapeName = "commentBoxRectangular" },
+        [6] = { name = "Comment Box", shapeName = "commentBoxOval" },
     },
 },
 [2] = {

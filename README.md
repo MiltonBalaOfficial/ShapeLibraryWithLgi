@@ -19,7 +19,7 @@ Quick Shape Library for inserting predefined shapes into a Xournal++ document vi
 3. **Use the plugin** as needed
 
 
-## Add Your Own Shape with "Extract_Stroke_Info"
+## Add Your Own Shape 
 
 1. **Draw your own shape** in Xournal++ and place it at the top left corner of the page.
   *Note: The shape will be inserted at the same position. When you want to insert the sape if the page is smaller than the current one, you may not be able to see the inserted shapes.*
