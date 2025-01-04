@@ -365,13 +365,33 @@ function show_main_shape_dialog()
                     left_vertical_box:pack_start(labelAddShape, false, false, 0)
                     labelAddShape:show()
 
-                    -- Add shape from selection Button
+                    -- Add shape from selection Button with custom dynamic label
+                    local add_or_update_shape_label_initial = Gtk.Label {
+                        label = "<span foreground='green'>Add or Update Shape</span>",
+                        use_markup = true,
+                    }
+                    add_or_update_shape_label_initial:show()
+
+                    local add_or_update_shape_label_close = Gtk.Label {
+                        label = "<span foreground='red'>Cancel Add or update</span>",
+                        use_markup = true,
+                    }
+                    add_or_update_shape_label_close:show()
+
                     local add_or_update_shape_button = Gtk.Button {
-                        label = "Add or Update Shape"
+                        --child = add_or_update_dynamic_button_label,
+                        child = add_or_update_shape_label_initial,
                     }
                     left_vertical_box:pack_start(add_or_update_shape_button, false, false, 0)
                     add_or_update_shape_button:show()
-                    
+
+                    local add_or_update_shape_button_close = Gtk.Button {
+                        --child = add_or_update_dynamic_button_label,
+                        child = add_or_update_shape_label_close,
+                    }
+                    left_vertical_box:pack_start(add_or_update_shape_button_close, false, false, 0)
+                    add_or_update_shape_button_close:hide()
+
                 -- vertical separator between category grid and shape grig
                 local vertical_separator_middle_left_right = Gtk.Separator {
                     orientation = Gtk.Orientation.VERTICAL
@@ -542,12 +562,12 @@ function show_main_shape_dialog()
                             category_input_horizontal_box:pack_start(entry1, false, false, 0)
 
                             --Category entry message
-                            local message1 = Gtk.Label {
+                            local category_name = Gtk.Label {
                                 -- label = string.format("<span foreground='orange'>%s</span>", addShapeMessage),
                                 label = "<span foreground='orange'>First select a category from the category list above.</span>",
                                 use_markup = true
                             }
-                            category_input_horizontal_box:pack_start(message1, false, false, 0)
+                            category_input_horizontal_box:pack_start(category_name, false, false, 0)
 
                         -- horizontal box to hold shape name entry fields
                         local shape_name_input_horizontal_box = Gtk.Box {
@@ -637,13 +657,14 @@ function show_main_shape_dialog()
             -- Add the "active" class to the first button
             buttonContext:add_class("active")
             previousCategoryButton = CategoryButton
+            updateMessage(category_name, category_data.name)
         end
 
         -- Handle button click to toggle active state
         CategoryButton.on_clicked = function()
-
+            updateMessage(category_name, category_data.name)
             if isAddShape then
-                updateMessage(message1, category_data.name)
+                --updateMessage(category_name, category_data.name)
                 updateMessage(message2, "Select a shape under the category.")
                 if isAddShapeToExistingCategory then
                     addShapeCategoryName = category_data.name
@@ -669,53 +690,6 @@ function show_main_shape_dialog()
     category_grid:show_all()
 
 
-
-
-    -- Handel Add Shape part clicked functions
-    local previousShapeButton = nil    -- Manage active state
-
-    -- Click handler for 'Add or Update Shape'
-    add_or_update_shape_button.on_clicked = function()
-        updateMessage(message1, "First select a category from the category list above.")
-        updateMessage(message2, "Select a shape under the category.")
-
-        if add_shape_main_vertical_box:get_visible() then -- when remove the add shape part
-            add_shape_main_vertical_box:hide()
-            add_shape_entry_vertical_box:hide()
-            window:resize(300, 200) -- will shrink the main window
-            right_vertical_box:set_sensitive(true)
-            category_grid:set_sensitive(true)
-            horizontal_box_for_scrolled_window_menu:set_sensitive(true)
-            horizontal_separator_above_shape_entry_fields:hide()
-
-            isAddShape, isAddShapeToExistingCategory, isAddShapeToNewCategory, isUpdateShape = nil, nil, nil, nil
-            addShapeViewName , addShapeShapeName, addShapeCategoryName, addShapeNewCategoryName = nil, nil, nil, nil
-
-            -- Deactivate the add shape buttons button
-            add_shape_button:get_style_context():remove_class("active")
-            add_shape_with_category_button:get_style_context():remove_class("active")
-            update_existing_shape:get_style_context():remove_class("active")
-            previousShapeButton = nil -- Clear the previousShapeButton reference
-        else -- When opens the add shape extra part
-            isAddShape = true
-            add_shape_main_vertical_box:show()
-            add_shape_horizontal_box:show()
-            add_shape_button_vertical_box:show_all()
-            right_vertical_box:set_sensitive(false)
-            category_grid:set_sensitive(false)
-            horizontal_separator_above_shape_entry_fields:show()
-        end
-    end
-
-    -- Click handler and manage active state for add shape different buttons
-    local function applyCss(button) -- Apply CSS to all buttons
-        local context = button:get_style_context()
-        context:add_provider(customCssProvider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
-    end
-    applyCss(add_shape_button)
-    applyCss(add_shape_with_category_button)
-    applyCss(update_existing_shape)
-
     local function setActive(button)
         -- Remove the active state from the previous button
         if previousShapeButton then
@@ -726,6 +700,70 @@ function show_main_shape_dialog()
         button:get_style_context():add_class("active")
         previousShapeButton = button
     end
+
+    -- Handel Add Shape part clicked functions
+    local previousShapeButton = nil    -- Manage active state
+
+    -- Click handler for 'Add or Update Shape'
+    add_or_update_shape_button.on_clicked = function()
+        local status, isSelection = pcall(app.getStrokes, "selection") -- Use pcall to handle errors
+        if not status or not isSelection or #isSelection == 0 then
+            app.openDialog("First select your Shape!", {"OK"})
+            window:destroy()
+        end
+        updateMessage(message2, "Select a shape under the category.")
+        isAddShape = true
+        add_shape_main_vertical_box:show()
+        add_shape_horizontal_box:show()
+        add_shape_button_vertical_box:show_all()
+        right_vertical_box:set_sensitive(false)
+        category_grid:set_sensitive(false)
+        horizontal_separator_above_shape_entry_fields:show()
+        add_or_update_shape_button_close:show()
+        add_or_update_shape_button:hide()
+
+        -- Do what addShapeToExistingCategoryButton do
+        isAddShapeToExistingCategory = true
+        isUpdateShape = false
+        isAddShapeToNewCategory = false
+        setActive(add_shape_button)
+        add_shape_entry_vertical_box:show_all()
+        entry1:hide()
+        message2:hide()
+        right_vertical_box:set_sensitive(false)
+        category_grid:set_sensitive(true)
+    end
+    -- Add shape cancel button click handler as like as cancel button
+    add_or_update_shape_button_close.on_clicked = function()
+        add_shape_main_vertical_box:hide()
+        add_shape_entry_vertical_box:hide()
+        window:resize(300, 200) -- will shrink the main window
+        right_vertical_box:set_sensitive(true)
+        category_grid:set_sensitive(true)
+        horizontal_box_for_scrolled_window_menu:set_sensitive(true)
+        horizontal_separator_above_shape_entry_fields:hide()
+
+        isAddShape, isAddShapeToExistingCategory, isAddShapeToNewCategory, isUpdateShape = nil, nil, nil, nil
+        addShapeViewName , addShapeShapeName, addShapeCategoryName, addShapeNewCategoryName = nil, nil, nil, nil
+
+        -- Deactivate the add shape buttons button
+        add_shape_button:get_style_context():remove_class("active")
+        add_shape_with_category_button:get_style_context():remove_class("active")
+        update_existing_shape:get_style_context():remove_class("active")
+        previousShapeButton = nil -- Clear the previousShapeButton reference
+
+        add_or_update_shape_button_close:hide()
+        add_or_update_shape_button:show()
+    end
+
+    -- Click handler and manage active state for add shape different buttons
+    local function applyCss(button) -- Apply CSS to all buttons
+        local context = button:get_style_context()
+        context:add_provider(customCssProvider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+    end
+    applyCss(add_shape_button)
+    applyCss(add_shape_with_category_button)
+    applyCss(update_existing_shape)
 
     -- add shape to existing category click handler
     add_shape_button.on_clicked = function()
@@ -747,7 +785,7 @@ function show_main_shape_dialog()
         isUpdateShape = false
         setActive(add_shape_with_category_button)
         add_shape_entry_vertical_box:show_all()
-        message1:hide()
+        category_name:hide()
         message2:hide()
         right_vertical_box:set_sensitive(false)
         category_grid:set_sensitive(false)
@@ -769,7 +807,7 @@ function show_main_shape_dialog()
 
     -- Click handler for Add Shape cancel button
     cancel_button.on_clicked = function()
-        updateMessage(message1, "First select a category from the category list above.")
+        updateMessage(category_name, "First select a category from the category list above.")
         updateMessage(message2, "Select a shape under the category.")
 
         if add_shape_main_vertical_box:get_visible() then -- remove the add shape part
@@ -788,6 +826,9 @@ function show_main_shape_dialog()
             add_shape_with_category_button:get_style_context():remove_class("active")
             update_existing_shape:get_style_context():remove_class("active")
             previousShapeButton = nil -- Clear the previousShapeButton reference
+
+            add_or_update_shape_button_close:hide()
+            add_or_update_shape_button:show()
         end
     end
 
@@ -834,6 +875,8 @@ function show_main_shape_dialog()
             window:destroy()
             show_main_shape_dialog()
         end
+        add_or_update_shape_button_close:hide()
+        add_or_update_shape_button:show()
     end
 
 
