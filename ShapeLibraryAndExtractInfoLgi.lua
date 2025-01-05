@@ -216,7 +216,6 @@ function add_image_to_drawing_area(cr, shapeName, drawing_area)
             grid = Gtk.Grid {
                 column_spacing = 10,
                 row_spacing = 1,
-                column_homogeneous = true
             }
         end
 
@@ -239,7 +238,7 @@ function add_image_to_drawing_area(cr, shapeName, drawing_area)
         for _, shape in ipairs(selected_category.shapes) do
             local button = Gtk.Button {
                 label = shape.name,
-                height_request = 30
+                width_request = 200, -- same as the drawing area
             }
             button.on_clicked = function()
                 if isAddShape then -- when adding shape on click it will provide the shape name without inserting any shape

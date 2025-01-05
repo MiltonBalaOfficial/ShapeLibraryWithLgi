@@ -66,4 +66,12 @@ return {
         [8] = { name = "Organ Pipes", shapeName = "organPipes" },
     },
 },
+[7] = {
+    name = "Chemistry",
+    shapes = {
+        [1] = { name = "Benzene (RS)", shapeName = "benzene(rs)" },
+        [2] = { name = "Benzene-1", shapeName = "benzene-1" },
+        [3] = { name = "Benzene-2", shapeName = "benzene-2" },
+    },
+},
 }
