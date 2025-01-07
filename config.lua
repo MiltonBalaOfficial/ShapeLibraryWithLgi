@@ -19,6 +19,7 @@ return {
         [4] = { name = "Right Angle Triangle", shapeName = "rightAngleTriangle" },
         [5] = { name = "Parallelogram", shapeName = "Parallelogram" },
         [6] = { name = "Hexagon", shapeName = "hexagon" },
+        [7] = { name = "Pentagon", shapeName = "pentagon" },
     },
 },
 [3] = {
@@ -72,6 +73,7 @@ return {
         [1] = { name = "Benzene (RS)", shapeName = "benzene(rs)" },
         [2] = { name = "Benzene-1", shapeName = "benzene-1" },
         [3] = { name = "Benzene-2", shapeName = "benzene-2" },
+        [4] = { name = "Cyclopentane", shapeName = "cyclopentane" },
     },
 },
 }

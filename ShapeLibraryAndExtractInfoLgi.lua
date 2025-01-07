@@ -874,8 +874,24 @@ function show_main_shape_dialog()
             window:destroy()
             show_main_shape_dialog()
         end
+
+        add_shape_main_vertical_box:hide()
+        add_shape_entry_vertical_box:hide()
+        window:resize(300, 200) -- will shrink the main window
+        right_vertical_box:set_sensitive(true)
+        category_grid:set_sensitive(true)
+        horizontal_box_for_scrolled_window_menu:set_sensitive(true)
+
         add_or_update_shape_button_close:hide()
         add_or_update_shape_button:show()
+
+        -- Deactivate the add shape buttons
+        add_shape_button:get_style_context():remove_class("active")
+        add_shape_with_category_button:get_style_context():remove_class("active")
+        update_existing_shape:get_style_context():remove_class("active")
+        previousShapeButton = nil -- Clear the previousShapeButton reference
+
+
     end
 
 
